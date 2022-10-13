@@ -56,7 +56,6 @@ ip4_addr_t gw;
   */
 void MX_LWIP_Init(void)
 {
-	return; // delete later
   /* Initilialize the LwIP stack with RTOS */
   tcpip_init( NULL, NULL );
 

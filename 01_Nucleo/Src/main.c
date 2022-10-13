@@ -30,6 +30,8 @@
 #include "dbgu.h"
 #include "term_io.h"
 #include "ansi.h"
+#include "usbh_platform.h"
+#include "lwip/api.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -69,12 +71,8 @@ void StartDefaultTask(void const * argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-int foo(int a, int b)
-{
-	int c;
-	c=a+b;
-	return c;
-}
+extern ApplicationTypeDef Appli_state;
+extern struct netif gnetif;
 /* USER CODE END 0 */
 
 /**
@@ -111,19 +109,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
   debug_init(&huart3);
   xprintf(ANSI_BG_BLUE "Nucleo-144 project" ANSI_BG_DEFAULT "\n");
-  printf("Zwykly printf tez dziala\n");
-
-  int a=10;
-  int b=25;
-  while(1)
-  {
-	  xprintf("a=%d, b=%d\n",a,b);
-	  int res = foo(a,b);
-	  a++;
-	  b--;
-	  xprintf("res=%2d\n",res);
-	  HAL_Delay(1000);
-  }
   /* USER CODE END 2 */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -320,7 +305,103 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void displayOwnIp(void)
+{
 
+  xprintf(
+    "My IP: %d.%d.%d.%d\n",
+    ip4_addr1_16(netif_ip4_addr(&gnetif)),
+    ip4_addr2_16(netif_ip4_addr(&gnetif)),
+    ip4_addr3_16(netif_ip4_addr(&gnetif)),
+    ip4_addr4_16(netif_ip4_addr(&gnetif))
+    );
+}
+
+static char response[500];
+
+//based on available code examples
+static void http_server_serve(struct netconn *conn)
+{
+  struct netbuf *inbuf;
+  err_t recv_err;
+  char* buf;
+  u16_t buflen;
+
+  /* Read the data from the port, blocking if nothing yet there.
+   We assume the request (the part we care about) is in one netbuf */
+  recv_err = netconn_recv(conn, &inbuf);
+
+  if (recv_err == ERR_OK)
+  {
+    if (netconn_err(conn) == ERR_OK)
+    {
+      netbuf_data(inbuf, (void**)&buf, &buflen);
+
+      /* Is this an HTTP GET command? (only check the first 5 chars, since
+      there are other formats for GET, and we're keeping it very simple )*/
+      if ((buflen >=5) && (strncmp(buf, "GET /", 5) == 0))
+      {
+        response[0] = 0;
+
+        strcpy(response, "HTTP/1.1 200 OK\r\n\
+          Content-Type: text/html\r\n\
+          Connnection: close\r\n\r\n\
+          <!DOCTYPE HTML>\r\n");
+
+        strcat(response,"<title>Prosta strona WWW</title>");
+        strcat(response,"<h1>H1 Header</h1>");
+
+        strcat(response,"A to jest tekst na stronie");
+          netconn_write(conn, response, sizeof(response), NETCONN_NOCOPY);
+      }
+    }
+  }
+  /* Close the connection (server closes in HTTP) */
+  netconn_close(conn);
+
+  /* Delete the buffer (netconn_recv gives us ownership,
+   so we have to make sure to deallocate the buffer) */
+  netbuf_delete(inbuf);
+}
+
+
+//based on available code examples
+static void http_server_netconn_thread(void const *arg)
+{
+  struct netconn *conn, *newconn;
+  err_t err, accept_err;
+
+  xprintf("http_server_netconn_thread\n");
+
+  /* Create a new TCP connection handle */
+  conn = netconn_new(NETCONN_TCP);
+
+  if (conn!= NULL)
+  {
+    /* Bind to port 80 (HTTP) with default IP address */
+    err = netconn_bind(conn, NULL, 80);
+
+    if (err == ERR_OK)
+    {
+      /* Put the connection into LISTEN state */
+      netconn_listen(conn);
+
+      while(1)
+      {
+        /* accept any icoming connection */
+        accept_err = netconn_accept(conn, &newconn);
+        if(accept_err == ERR_OK)
+        {
+          /* serve connection */
+          http_server_serve(newconn);
+
+          /* delete connection */
+          netconn_delete(newconn);
+        }
+      }
+    }
+  }
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
@@ -339,19 +420,81 @@ void StartDefaultTask(void const * argument)
   MX_LWIP_Init();
 
   /* USER CODE BEGIN 5 */
-  xprintf("random print\n");
+  xprintf("Obtaining address with DHCP...\n");
+  struct dhcp *dhcp = netif_dhcp_data(&gnetif);
+  do
+  {
+	  xprintf("dhcp->state = %02X\n",dhcp->state);
+	  vTaskDelay(250);
+  }while(dhcp->state != 0x0A);
+  xprintf("DHCP bound\n");
+  displayOwnIp();
+  osThreadDef(netconn_thread, http_server_netconn_thread, osPriorityNormal, 0, 1024);
+  osThreadCreate(osThread(netconn_thread), NULL);
+
+  MX_DriverVbusFS(0); //wlacza zasilanie urzadzenia USB
+  xprintf("waiting for USB device...");
+  do{
+	  xprintf(".");
+	  vTaskDelay(100);
+  }while(Appli_state != APPLICATION_READY);
+
+  xprintf("USB device ready!");
+
   /* Infinite loop */
   for(;;)
   {
-	  //LD3 zmieni stan (toggle)
-	  HAL_GPIO_TogglePin(LD3_GPIO_Port,LD3_Pin);
-	  //LD2 wlaczona, czekamy 250 tickow i wylaczamy
-	  HAL_GPIO_WritePin(LD2_GPIO_Port,LD2_Pin,
-	  GPIO_PIN_SET);
-	  osDelay(250);
-	  HAL_GPIO_WritePin(LD2_GPIO_Port,LD2_Pin,
-	  GPIO_PIN_RESET);
-	  osDelay(250);
+	  osDelay(10);
+	  char key = inkey();
+	  switch(key)
+	  {
+		  case 'w':
+		  {
+			  xprintf("write test\n");
+			  FRESULT res;
+			  UINT bw;
+			  FIL file;
+			  const char* text = "Linijka tekstu!\n";
+			  xprintf("f_open... ");
+			  res = f_open(&file,"0:/test.txt",FA_WRITE|FA_OPEN_APPEND);
+			  xprintf("res=%d\n",res);
+			  if(res) break;
+			  xprintf("f_write... ");
+			  res = f_write(&file,text,strlen(text),&bw);
+			  xprintf("res=%d, bw=%d\n",res,bw);
+			  f_close(&file);
+			  break;
+		  }
+		  case 'r':
+		  {
+			  xprintf("read test!\n");
+			  FIL file;
+			  FRESULT res = f_open(&file,"0:/test.txt",FA_READ);
+			  xprintf("f_open res=%d\n",res);
+			  if(res) break;
+			  const uint32_t BUF_SIZE = 64;
+			  char buf[BUF_SIZE];
+			  UINT br;
+			  xprintf("reading file contents:\n");
+			  do
+			  {
+				  res = f_read(&file,buf,BUF_SIZE,&br);
+				  if((res == FR_OK) && (br))
+				  {
+					  xprintf("chunk:\n");
+					  debug_dump(buf,br);
+				  }
+				  else
+				  {
+					  xprintf("f_read res=%d\n",res);
+					  break;
+				  }
+			  }while(br>0);
+
+			  f_close(&file);
+			  break;
+		  }
+	  }
   }
   /* USER CODE END 5 */
 }
