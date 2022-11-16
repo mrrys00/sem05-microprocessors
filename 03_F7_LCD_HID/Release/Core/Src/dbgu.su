@@ -1,0 +1,11 @@
+dbgu.c:33:6:debug_shdn	0	static
+dbgu.c:43:6:debug_init	0	static
+dbgu.c:49:6:debug_chr	0	static
+dbgu.c:61:5:__io_putchar	8	static
+dbgu.c:69:6:debug_inkey	0	static
+dbgu.c:84:6:debug_waitkey	16	static
+dbgu.c:111:6:debug_txt	8	static
+dbgu.c:103:6:debug_msg	8	static
+dbgu.c:130:6:debug_ascii	0	static
+dbgu.c:118:6:debug_txt_limit	8	static
+dbgu.c:160:6:debug_dump	32	static
