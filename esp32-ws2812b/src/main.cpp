@@ -6,6 +6,9 @@
 #define D15 15
 #define LED_NUMBER 8
 
+#define minTemp 23
+#define maxTmep 29
+
 struct HSL
 {
     int H;
@@ -36,12 +39,12 @@ void setup()
     Serial.begin(115200);
     // Start the DS18B20 sensor
     sensors.begin();
-
+    // blink all leds blue
     for (int i = 0; i < LED_NUMBER; i++)
     {
         pixels.setPixelColor(i, pixels.Color(0, 100, 255));
-        pixels.show();
     }
+    pixels.show();
 }
 
 float HueToRGB(float v1, float v2, float vH)
@@ -105,22 +108,10 @@ void loop()
     Serial.print(temperatureF);
     Serial.println("ºF");
 
-    // pixels.Color takes RGB values, from 0,0,0 up to 255,255,255
-    // for (int i = 0; i < 2; i++)
-    // {
-    //     for (int j = 0; j < 2; j++)
-    //     {
-    //         for (int k = 0; k < 2; k++)
-    //         {
-    // delay(200);                                                       // Delay for a period of time (in milliseconds).
-    //         }
-    //     }
-    // }
-
-    int minTemp = 23, maxTmep = 29;
-
+    // scaling temperature
     float temperatureScale = 1 - max(min((temperatureC - minTemp) / (maxTmep - minTemp), 1.0f), 0.0f);
 
+    // converting temperature to RGB scale using HSL values -> Hue param
     float hueVal = temperatureScale * 255;
     struct HSL hsl;
     hsl.H = (int)hueVal / 1;
@@ -129,16 +120,16 @@ void loop()
 
     struct RGB rgb = hslTORGB(hsl);
 
+    // setting leds
     for (int i = 0; i < LED_NUMBER; i++)
     {
-        pixels.setPixelColor(i, pixels.Color(rgb.R, rgb.G, rgb.B)); // Moderately bright green color.
+        pixels.setPixelColor(i, pixels.Color(rgb.R, rgb.G, rgb.B));
     }
-    pixels.show(); // This sends the updated pixel color to the hardware.
+    pixels.show();
 
     Serial.printf("HSL %f %f %f\n", hsl.H, hsl.S, hsl.L);
     Serial.printf("RGB %d %d %d\n", rgb.R, rgb.G, rgb.B);
     Serial.printf("temperature scale %f\n", temperatureScale);
-
 
     delay(200);
 }
